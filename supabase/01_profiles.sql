@@ -23,4 +23,14 @@ create policy "Users can insert their own profile."
 
 create policy "Users can update own profile."
   on profiles for update
-  using ( auth.uid() = id );" 
+  using ( auth.uid() = id );
+-- Add arrays for skills and availability to the existing profiles table
+alter table profiles 
+add column skills_offered text[] default '{}',
+add column skills_wanted text[] default '{}',
+add column availability text[] default '{}';
+
+-- Create GIN indexes to make array searching blazing fast
+create index idx_skills_offered on profiles using gin (skills_offered);
+create index idx_skills_wanted on profiles using gin (skills_wanted);
+" 

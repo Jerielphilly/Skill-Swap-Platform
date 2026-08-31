@@ -1,45 +1,31 @@
-3. API Contract (For your Frontend Friend)
-Pass this to your friend. Pay special attention to snippet #2—because there are two relationships between swap_requests and profiles (sender and receiver), we have to explicitly tell Supabase which one to join on!
+"create table swap_requests (
+  id uuid default gen_random_uuid() primary key,
+  sender_id uuid references profiles(id) not null,
+  receiver_id uuid references profiles(id) not null,
+  message text not null,
+  status text check (status in ('pending', 'accepted', 'rejected')) default 'pending',
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
 
-javascript
+-- Turn on security!
+alter table swap_requests enable row level security;
 
+-- Policy 1: Senders and Receivers can view the request
+create policy "Users can view their own swap requests"
+  on swap_requests for select
+  using ( auth.uid() = sender_id or auth.uid() = receiver_id );
 
-// 1. Send a swap request with custom text
-const sendSwapRequest = async (myUserId, receiverId, customMessage) => {
-  const { error } = await supabase
-    .from('swap_requests')
-    .insert({
-      sender_id: myUserId, 
-      receiver_id: receiverId,
-      message: customMessage
-    });
-};
-// 2. Fetch INCOMING pending requests (Joined with the sender's profile info!)
-const fetchIncomingRequests = async (myUserId) => {
-  const { data, error } = await supabase
-    .from('swap_requests')
-    .select(`
-      id, 
-      message, 
-      status,
-      profiles!swap_requests_sender_id_fkey(full_name, avatar_url, skills_offered)
-    `)
-    .eq('receiver_id', myUserId)
-    .eq('status', 'pending');
-    
-  return data; // Friend will get an array of requests containing the sender's name/skills!
-};
-// 3. Accept a request (Receiver action)
-const acceptRequest = async (requestId) => {
-  const { error } = await supabase
-    .from('swap_requests')
-    .update({ status: 'accepted' })
-    .eq('id', requestId);
-};
-// 4. Delete an unaccepted request (Sender action)
-const deleteRequest = async (requestId) => {
-  const { error } = await supabase
-    .from('swap_requests')
-    .delete()
-    .eq('id', requestId);
-};
+-- Policy 2: Users can only send requests as themselves
+create policy "Users can send swap requests"
+  on swap_requests for insert
+  with check ( auth.uid() = sender_id );
+
+-- Policy 3: Only the receiver can accept or reject (update the status)
+create policy "Receivers can update request status"
+  on swap_requests for update
+  using ( auth.uid() = receiver_id );
+
+-- Policy 4: Senders can delete unaccepted requests
+create policy "Senders can delete unaccepted requests"
+  on swap_requests for delete
+  using ( auth.uid() = sender_id and status != 'accepted' );"
