@@ -1,4 +1,4 @@
-"create table swap_requests (
+create table swap_requests (
   id uuid default gen_random_uuid() primary key,
   sender_id uuid references profiles(id) not null,
   receiver_id uuid references profiles(id) not null,
@@ -28,4 +28,4 @@ create policy "Receivers can update request status"
 -- Policy 4: Senders can delete unaccepted requests
 create policy "Senders can delete unaccepted requests"
   on swap_requests for delete
-  using ( auth.uid() = sender_id and status != 'accepted' );"
+  using ( auth.uid() = sender_id and status != 'accepted' );

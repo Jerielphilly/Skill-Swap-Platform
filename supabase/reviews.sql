@@ -1,4 +1,4 @@
-"create table swap_reviews (
+create table swap_reviews (
   id uuid default gen_random_uuid() primary key,
   swap_request_id uuid references swap_requests(id) not null,
   reviewer_id uuid references profiles(id) not null,
@@ -20,4 +20,4 @@ create policy "Reviews are viewable by everyone"
 -- Policy 2: Users can only submit reviews as themselves
 create policy "Users can insert own reviews"
   on swap_reviews for insert
-  with check ( auth.uid() = reviewer_id );"
+  with check ( auth.uid() = reviewer_id );
