@@ -12,6 +12,12 @@ import {
 } from '../types';
 import { INITIAL_USERS, INITIAL_SWAPS, INITIAL_ANNOUNCEMENTS } from '../mockData';
 
+// Helper to check if a string is a valid UUID
+export const isUuid = (id?: string | null): boolean => {
+  if (!id) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+};
+
 // ==========================================
 // Database Schema Types from Supabase
 // ==========================================
@@ -232,7 +238,6 @@ export const fetchAllPublicProfiles = async (): Promise<UserProfile[]> => {
       .eq('is_public', true);
 
     if (error) {
-      console.warn("Supabase fetchAllPublicProfiles error (using mock fallback):", error.message);
       return INITIAL_USERS;
     }
 
@@ -242,7 +247,6 @@ export const fetchAllPublicProfiles = async (): Promise<UserProfile[]> => {
 
     return data.map(p => mapDbProfileToUserProfile(p));
   } catch (err) {
-    console.error("Error in fetchAllPublicProfiles:", err);
     return INITIAL_USERS;
   }
 };
@@ -251,6 +255,11 @@ export const fetchAllPublicProfiles = async (): Promise<UserProfile[]> => {
  * Fetch a user's public profile (Contract #1)
  */
 export const fetchProfile = async (userId: string) => {
+  if (!isUuid(userId)) {
+    const local = INITIAL_USERS.find(u => u.id === userId);
+    return local || null;
+  }
+
   try {
     const { data, error } = await supabase
       .from('profiles')
@@ -259,13 +268,11 @@ export const fetchProfile = async (userId: string) => {
       .single();
 
     if (error) {
-      console.warn("Error fetching profile from Supabase:", error.message);
       const local = INITIAL_USERS.find(u => u.id === userId);
       return local || null;
     }
     return data;
   } catch (err) {
-    console.error("fetchProfile exception:", err);
     return null;
   }
 };
@@ -281,6 +288,10 @@ export const updateSkills = async (
     availability?: string[];
   }
 ) => {
+  if (!isUuid(userId)) {
+    return { data: null, error: null };
+  }
+
   try {
     const { data, error } = await supabase
       .from('profiles')
@@ -292,12 +303,8 @@ export const updateSkills = async (
       .eq('id', userId)
       .select();
 
-    if (error) {
-      console.error("Error updating skills in Supabase:", error.message);
-    }
     return { data, error };
   } catch (err: any) {
-    console.error("updateSkills exception:", err);
     return { data: null, error: err };
   }
 };
@@ -309,6 +316,10 @@ export const updateProfile = async (
   userId: string,
   updates: Partial<DbProfile>
 ) => {
+  if (!isUuid(userId)) {
+    return { data: null, error: null };
+  }
+
   try {
     const { data, error } = await supabase
       .from('profiles')
@@ -316,12 +327,8 @@ export const updateProfile = async (
       .eq('id', userId)
       .select();
 
-    if (error) {
-      console.error("Error updating profile in Supabase:", error.message);
-    }
     return { data, error };
   } catch (err: any) {
-    console.error("updateProfile exception:", err);
     return { data: null, error: err };
   }
 };
@@ -338,16 +345,13 @@ export const searchUsersBySkill = async (skillToFind: string) => {
       .contains('skills_offered', [skillToFind]) // The .contains() method uses GIN index!
       .eq('is_public', true); // Only search public profiles
 
-    if (error) {
-      console.error("Search error in Supabase:", error.message);
-      // Fallback local search
+    if (error || !data) {
       return INITIAL_USERS.filter(u => 
         u.skillsOffered.some(s => s.name.toLowerCase().includes(skillToFind.toLowerCase()))
       );
     }
     return data;
   } catch (err) {
-    console.error("searchUsersBySkill exception:", err);
     return [];
   }
 };
@@ -364,6 +368,10 @@ export const sendSwapRequest = async (
   receiverId: string, 
   customMessage: string
 ) => {
+  if (!isUuid(myUserId) || !isUuid(receiverId)) {
+    return { data: null, error: null };
+  }
+
   try {
     const { data, error } = await supabase
       .from('swap_requests')
@@ -376,12 +384,8 @@ export const sendSwapRequest = async (
       .select()
       .single();
 
-    if (error) {
-      console.warn("Supabase sendSwapRequest error:", error.message);
-    }
     return { data, error };
   } catch (err: any) {
-    console.error("sendSwapRequest exception:", err);
     return { data: null, error: err };
   }
 };
@@ -390,6 +394,10 @@ export const sendSwapRequest = async (
  * Fetch INCOMING pending requests joined with sender's profile info (Contract #4.2)
  */
 export const fetchIncomingRequests = async (myUserId: string) => {
+  if (!isUuid(myUserId)) {
+    return [];
+  }
+
   try {
     const { data, error } = await supabase
       .from('swap_requests')
@@ -409,12 +417,10 @@ export const fetchIncomingRequests = async (myUserId: string) => {
       .eq('status', 'pending');
 
     if (error) {
-      console.warn("Error fetching incoming requests:", error.message);
       return [];
     }
     return data || [];
   } catch (err) {
-    console.error("fetchIncomingRequests exception:", err);
     return [];
   }
 };
@@ -423,6 +429,10 @@ export const fetchIncomingRequests = async (myUserId: string) => {
  * Fetch all swap requests (sent and received) for a user
  */
 export const fetchUserSwaps = async (myUserId: string) => {
+  if (!isUuid(myUserId)) {
+    return null;
+  }
+
   try {
     const { data, error } = await supabase
       .from('swap_requests')
@@ -440,12 +450,10 @@ export const fetchUserSwaps = async (myUserId: string) => {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.warn("Error fetching user swaps:", error.message);
       return null;
     }
     return data;
   } catch (err) {
-    console.error("fetchUserSwaps exception:", err);
     return null;
   }
 };
@@ -454,15 +462,16 @@ export const fetchUserSwaps = async (myUserId: string) => {
  * Accept a request - Receiver action (Contract #4.3)
  */
 export const acceptRequest = async (requestId: string) => {
+  if (!isUuid(requestId)) {
+    return { error: null };
+  }
+
   try {
     const { error } = await supabase
       .from('swap_requests')
       .update({ status: 'accepted' })
       .eq('id', requestId);
 
-    if (error) {
-      console.error("Error accepting request in Supabase:", error.message);
-    }
     return { error };
   } catch (err: any) {
     return { error: err };
@@ -473,15 +482,16 @@ export const acceptRequest = async (requestId: string) => {
  * Reject a request - Receiver action
  */
 export const rejectRequest = async (requestId: string) => {
+  if (!isUuid(requestId)) {
+    return { error: null };
+  }
+
   try {
     const { error } = await supabase
       .from('swap_requests')
       .update({ status: 'rejected' })
       .eq('id', requestId);
 
-    if (error) {
-      console.error("Error rejecting request in Supabase:", error.message);
-    }
     return { error };
   } catch (err: any) {
     return { error: err };
@@ -492,15 +502,16 @@ export const rejectRequest = async (requestId: string) => {
  * Delete an unaccepted request - Sender action (Contract #4.4)
  */
 export const deleteRequest = async (requestId: string) => {
+  if (!isUuid(requestId)) {
+    return { error: null };
+  }
+
   try {
     const { error } = await supabase
       .from('swap_requests')
       .delete()
       .eq('id', requestId);
 
-    if (error) {
-      console.error("Error deleting request in Supabase:", error.message);
-    }
     return { error };
   } catch (err: any) {
     return { error: err };
@@ -521,6 +532,10 @@ export const submitReview = async (
   starRating: number, 
   reviewText: string
 ) => {
+  if (!isUuid(swapId) || !isUuid(myUserId) || !isUuid(revieweeId)) {
+    return { data: null, error: null };
+  }
+
   try {
     const { data, error } = await supabase
       .from('swap_reviews')
@@ -534,12 +549,8 @@ export const submitReview = async (
       .select()
       .single();
 
-    if (error) {
-      console.error("Error submitting review in Supabase:", error.message);
-    }
     return { data, error };
   } catch (err: any) {
-    console.error("submitReview exception:", err);
     return { data: null, error: err };
   }
 };
@@ -548,6 +559,10 @@ export const submitReview = async (
  * Fetch all reviews for a specific user to display on their profile (Contract #5.2)
  */
 export const fetchUserReviews = async (userIdToDisplay: string) => {
+  if (!isUuid(userIdToDisplay)) {
+    return [];
+  }
+
   try {
     const { data, error } = await supabase
       .from('swap_reviews')
@@ -567,12 +582,10 @@ export const fetchUserReviews = async (userIdToDisplay: string) => {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.warn("Error fetching user reviews from Supabase:", error.message);
       return [];
     }
     return data || [];
   } catch (err) {
-    console.error("fetchUserReviews exception:", err);
     return [];
   }
 };
@@ -591,12 +604,7 @@ export const fetchMessages = async (): Promise<PlatformAnnouncement[]> => {
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.warn("Error fetching platform messages:", error.message);
-      return INITIAL_ANNOUNCEMENTS;
-    }
-
-    if (!data || data.length === 0) {
+    if (error || !data || data.length === 0) {
       return INITIAL_ANNOUNCEMENTS;
     }
 
@@ -610,7 +618,6 @@ export const fetchMessages = async (): Promise<PlatformAnnouncement[]> => {
       author: 'Platform Admin',
     }));
   } catch (err) {
-    console.error("fetchMessages exception:", err);
     return INITIAL_ANNOUNCEMENTS;
   }
 };
@@ -628,9 +635,6 @@ export const createPlatformMessage = async (messageText: string) => {
       .select()
       .single();
 
-    if (error) {
-      console.error("Error creating platform message in Supabase:", error.message);
-    }
     return { data, error };
   } catch (err: any) {
     return { data: null, error: err };
@@ -641,6 +645,10 @@ export const createPlatformMessage = async (messageText: string) => {
  * Delete a platform message announcement (Admin only)
  */
 export const deletePlatformMessage = async (messageId: string) => {
+  if (!isUuid(messageId)) {
+    return { error: null };
+  }
+
   try {
     const { error } = await supabase
       .from('platform_messages')
@@ -668,12 +676,10 @@ export const fetchAllSwapsForAdmin = async () => {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.warn("Error fetching all swaps for admin:", error.message);
       return null;
     }
     return data;
   } catch (err) {
-    console.error("fetchAllSwapsForAdmin exception:", err);
     return null;
   }
 };
@@ -707,16 +713,16 @@ export const exportSwapsToCsv = (swaps: any[]) => {
  * Ban a user and wipe their skills - Admin only RPC (Contract #6.3)
  */
 export const banSpamUser = async (badUserId: string) => {
+  if (!isUuid(badUserId)) {
+    return { error: null };
+  }
+
   try {
     const { error } = await supabase
       .rpc('ban_user_and_wipe_skills', { target_user_id: badUserId });
 
-    if (error) {
-      console.warn("RPC ban_user_and_wipe_skills response:", error.message);
-    }
     return { error };
   } catch (err: any) {
-    console.error("banSpamUser exception:", err);
     return { error: err };
   }
 };
