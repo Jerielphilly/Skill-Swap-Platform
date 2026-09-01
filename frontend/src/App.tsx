@@ -124,19 +124,13 @@ export default function App() {
   const loadInitialData = async () => {
     setIsSyncing(true);
     try {
-      // 1. Fetch public profiles
+      // 1. Fetch public profiles directly from Supabase
       const dbProfiles = await fetchAllPublicProfiles();
       if (dbProfiles && dbProfiles.length > 0) {
-        setAllUsers(prev => {
-          // Merge dbProfiles with existing initial rich profiles
-          const combined = [...dbProfiles];
-          INITIAL_USERS.forEach(u => {
-            if (!combined.some(c => c.id === u.id || c.name.toLowerCase() === u.name.toLowerCase())) {
-              combined.push(u);
-            }
-          });
-          return combined;
-        });
+        setAllUsers(dbProfiles);
+        // If current user is in dbProfiles, keep synced
+        const syncedCurrent = dbProfiles.find(u => u.id === currentUser.id);
+        if (syncedCurrent) setCurrentUser(syncedCurrent);
       }
 
       // 2. Fetch platform messages

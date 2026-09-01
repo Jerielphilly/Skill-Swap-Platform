@@ -230,6 +230,9 @@ export function mapDbSwapToSwapRequest(
 /**
  * Fetch all public profiles
  */
+/**
+ * Fetch all public profiles directly from Supabase
+ */
 export const fetchAllPublicProfiles = async (): Promise<UserProfile[]> => {
   try {
     const { data, error } = await supabase
@@ -237,15 +240,50 @@ export const fetchAllPublicProfiles = async (): Promise<UserProfile[]> => {
       .select('*')
       .eq('is_public', true);
 
-    if (error) {
+    if (error || !data || data.length === 0) {
       return INITIAL_USERS;
     }
 
-    if (!data || data.length === 0) {
-      return INITIAL_USERS;
-    }
+    // Also fetch reviews for each user
+    const { data: allReviews } = await supabase
+      .from('swap_reviews')
+      .select(`
+        id,
+        swap_request_id,
+        reviewer_id,
+        reviewee_id,
+        rating,
+        review_text,
+        created_at,
+        profiles!swap_reviews_reviewer_id_fkey(id, full_name, avatar_url)
+      `);
 
-    return data.map(p => mapDbProfileToUserProfile(p));
+    return data.map(p => {
+      const user = mapDbProfileToUserProfile(p);
+      if (allReviews && allReviews.length > 0) {
+        const userReviews = allReviews
+          .filter((r: any) => r.reviewee_id === p.id)
+          .map((r: any) => ({
+            id: r.id,
+            swapId: r.swap_request_id,
+            reviewerId: r.reviewer_id,
+            reviewerName: r.profiles?.full_name || 'Verified Peer',
+            reviewerAvatar: r.profiles?.avatar_url || (r.profiles?.full_name?.includes('Charlie') ? 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150' : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150'),
+            rating: r.rating || 5,
+            skillExchanged: 'Peer Skill Exchange',
+            comment: r.review_text || 'Great swap session!',
+            date: r.created_at ? new Date(r.created_at).toLocaleDateString() : 'Recently',
+            badges: ['Verified Peer', 'Top Mentor'],
+          }));
+        if (userReviews.length > 0) {
+          user.reviews = userReviews;
+          user.reviewsCount = userReviews.length;
+          const sum = userReviews.reduce((acc: number, cur: any) => acc + cur.rating, 0);
+          user.rating = Math.round((sum / userReviews.length) * 10) / 10;
+        }
+      }
+      return user;
+    });
   } catch (err) {
     return INITIAL_USERS;
   }
