@@ -118,6 +118,19 @@ export default function App() {
     }, 4500);
   };
 
+  // Load swaps directly from Supabase for a given user
+  const loadSwapsForUser = async (userId: string, profilesList = allUsers) => {
+    try {
+      const dbSwaps = await fetchUserSwaps(userId);
+      if (dbSwaps && Array.isArray(dbSwaps)) {
+        const mappedSwaps = dbSwaps.map((s: any) => mapDbSwapToSwapRequest(s, profilesList, currentUser));
+        setSwaps(mappedSwaps);
+      }
+    } catch (e) {
+      console.warn("loadSwapsForUser error:", e);
+    }
+  };
+
   // =========================================================================
   // Initial Supabase Sync on Mount
   // =========================================================================
@@ -126,35 +139,26 @@ export default function App() {
     try {
       // 1. Fetch public profiles directly from Supabase
       const dbProfiles = await fetchAllPublicProfiles();
+      let activeProfiles = allUsers;
       if (dbProfiles && dbProfiles.length > 0) {
         setAllUsers(dbProfiles);
-        // If current user is in dbProfiles, keep synced
+        activeProfiles = dbProfiles;
         const syncedCurrent = dbProfiles.find(u => u.id === currentUser.id);
         if (syncedCurrent) setCurrentUser(syncedCurrent);
       }
 
-      // 2. Fetch platform messages
+      // 2. Fetch platform messages directly from Supabase
       const msgs = await fetchMessages();
       if (msgs && msgs.length > 0) {
         setAnnouncements(msgs);
       }
 
-      // 3. Fetch Swaps
-      const dbSwaps = await fetchUserSwaps(currentUser.id);
-      if (dbSwaps && Array.isArray(dbSwaps) && dbSwaps.length > 0) {
-        const mappedSwaps = dbSwaps.map((s: any) => mapDbSwapToSwapRequest(s, allUsers, currentUser));
-        setSwaps(prev => {
-          const merged = [...mappedSwaps];
-          prev.forEach(p => {
-            if (!merged.some(m => m.id === p.id)) merged.push(p);
-          });
-          return merged;
-        });
-      }
+      // 3. Fetch Swaps directly from Supabase
+      await loadSwapsForUser(currentUser.id, activeProfiles);
 
       setIsDbConnected(true);
     } catch (err) {
-      console.warn("Supabase initial load notice (fallback active):", err);
+      console.warn("Supabase initial load notice:", err);
       setIsDbConnected(true);
     } finally {
       setIsSyncing(false);
@@ -210,47 +214,19 @@ export default function App() {
     proposedSchedule: string;
     initialMessage: string;
   }) => {
-    const newSwapId = `swap-${Date.now()}`;
-    const newSwap: SwapRequest = {
-      id: newSwapId,
-      senderId: currentUser.id,
-      senderName: currentUser.name,
-      senderAvatar: currentUser.avatar,
-      senderHeadline: currentUser.headline,
-      receiverId: proposalData.targetUser.id,
-      receiverName: proposalData.targetUser.name,
-      receiverAvatar: proposalData.targetUser.avatar,
-      receiverHeadline: proposalData.targetUser.headline,
-      offeredSkill: proposalData.offeredSkill,
-      requestedSkill: proposalData.requestedSkill,
-      status: 'pending',
-      sessionFormat: proposalData.sessionFormat,
-      proposedSchedule: proposalData.proposedSchedule,
-      initialMessage: proposalData.initialMessage,
-      createdAt: 'Just now',
-      updatedAt: 'Just now',
-      objectives: [],
-      messages: [
-        {
-          id: `msg-${Date.now()}`,
-          senderId: currentUser.id,
-          senderName: currentUser.name,
-          senderAvatar: currentUser.avatar,
-          text: proposalData.initialMessage,
-          timestamp: 'Just now'
-        }
-      ]
-    };
+    // 1. Send directly to Supabase swap_requests table
+    const { data: insertedSwap, error } = await sendSwapRequest(
+      currentUser.id, 
+      proposalData.targetUser.id, 
+      proposalData.initialMessage
+    );
 
-    // Update local state immediately for instant feedback
-    setSwaps(prev => [newSwap, ...prev]);
-
-    // Send to Supabase
-    try {
-      await sendSwapRequest(currentUser.id, proposalData.targetUser.id, proposalData.initialMessage);
-    } catch (e) {
-      console.warn("Notice: Supabase live sync attempted:", e);
+    if (error) {
+      console.warn("Notice: Supabase live sync fallback:", error.message);
     }
+
+    // Refresh swaps directly from database
+    await loadSwapsForUser(currentUser.id);
 
     showToast(`Swap proposal sent to ${proposalData.targetUser.name}!`);
     setActiveTab('my-swaps');
@@ -258,50 +234,22 @@ export default function App() {
 
   // 2. Accept Swap
   const handleAcceptSwap = async (swapId: string) => {
-    setSwaps(prev => prev.map(s => {
-      if (s.id === swapId) {
-        return {
-          ...s,
-          status: 'accepted',
-          meetingLink: `https://meet.skillswap.live/room-${s.id.slice(0, 8)}`,
-          objectives: [
-            { id: 'obj-1', text: 'Introduction & skill evaluation', completed: true },
-            { id: 'obj-2', text: 'Live hands-on practice session', completed: false },
-            { id: 'obj-3', text: 'Mutual code/design review', completed: false }
-          ]
-        };
-      }
-      return s;
-    }));
-
-    try {
-      await acceptRequest(swapId);
-    } catch (e) {
-      console.warn("acceptRequest sync notice:", e);
-    }
-
+    await acceptRequest(swapId);
+    await loadSwapsForUser(currentUser.id);
     showToast("Swap request accepted! Workspace & live meeting room opened.");
   };
 
   // 3. Reject Swap
   const handleRejectSwap = async (swapId: string) => {
-    setSwaps(prev => prev.map(s => s.id === swapId ? { ...s, status: 'rejected' } : s));
-    try {
-      await rejectRequest(swapId);
-    } catch (e) {
-      console.warn("rejectRequest sync notice:", e);
-    }
+    await rejectRequest(swapId);
+    await loadSwapsForUser(currentUser.id);
     showToast("Swap proposal declined.", "info");
   };
 
   // 4. Cancel / Delete Swap
   const handleDeleteSwap = async (swapId: string) => {
-    setSwaps(prev => prev.filter(s => s.id !== swapId));
-    try {
-      await deleteRequest(swapId);
-    } catch (e) {
-      console.warn("deleteRequest sync notice:", e);
-    }
+    await deleteRequest(swapId);
+    await loadSwapsForUser(currentUser.id);
     showToast("Swap proposal cancelled.", "info");
   };
 
@@ -536,6 +484,7 @@ export default function App() {
           allUsers={allUsers}
           onSelectUser={(user) => {
             setCurrentUser(user);
+            loadSwapsForUser(user.id);
             showToast(`Switched active profile to ${user.name} (${user.role === 'admin' ? 'Super Admin' : 'Swapper'})`);
           }}
           activeTab={activeTab}
@@ -785,6 +734,7 @@ export default function App() {
         }}
         onSelectDemoUser={(user) => {
           setCurrentUser(user);
+          loadSwapsForUser(user.id);
           showToast(`Switched persona to ${user.name}`);
         }}
         allUsers={allUsers}
